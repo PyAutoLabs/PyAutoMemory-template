@@ -1,0 +1,50 @@
+# PDFs are kept locally only — they are available from arXiv / journal sites
+*.pdf
+
+# Other binary/large files we don't want in the repo
+*.exe
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.odt
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.jpg
+*.JPG
+*.jpeg
+*.png
+*.PNG
+*.gif
+*.tif
+*.tiff
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+__pycache__/
+*.pyc
+
+# LaTeX build artefacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+
+# Exception — the wiki's own log.md is text and must be tracked
+!lensing_wiki/log.md
