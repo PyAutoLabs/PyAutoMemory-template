@@ -20,6 +20,7 @@
 *.jpeg
 *.png
 *.PNG
+!logo.png
 *.gif
 *.tif
 *.tiff
@@ -33,6 +34,7 @@ desktop.ini
 *.swp
 *~
 __pycache__/
+.pytest_cache/
 *.pyc
 
 # LaTeX build artefacts
@@ -47,4 +49,4 @@ __pycache__/
 *.toc
 
 # Exception — the wiki's own log.md is text and must be tracked
-!lensing_wiki/log.md
+!wiki/*/log.md

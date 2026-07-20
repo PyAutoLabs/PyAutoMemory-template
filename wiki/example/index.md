@@ -1,4 +1,4 @@
-# example_wiki — index
+# example wiki — index
 
 The sub-wiki's own navigation. Sources are summarised under `sources/`
 (one page per paper/resource, see the stub); concept pages live beside

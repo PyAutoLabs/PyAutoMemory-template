@@ -82,7 +82,7 @@ def extract_canonical_keys(
 
 
 def source_directories(root: Path) -> tuple[Path, ...]:
-    return tuple(sorted(path for path in root.glob("*_wiki/sources") if path.is_dir()))
+    return tuple(sorted(path for path in root.glob("wiki/*/sources") if path.is_dir()))
 
 
 def collect_source_citations(directories: tuple[Path, ...]) -> tuple[SourceCitation, ...]:

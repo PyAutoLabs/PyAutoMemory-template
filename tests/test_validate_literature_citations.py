@@ -44,7 +44,7 @@ def test_extract_canonical_keys_from_source_markdown():
 def _fixture_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     bibliography = tmp_path / "literature.bib"
     bibliography.write_text("@article{Alpha2024,\n}\n", encoding="utf-8")
-    sources = tmp_path / "example_wiki" / "sources"
+    sources = tmp_path / "wiki" / "example" / "sources"
     sources.mkdir(parents=True)
     aliases = tmp_path / "aliases.yaml"
     aliases.write_text("", encoding="utf-8")
