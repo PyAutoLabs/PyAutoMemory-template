@@ -27,6 +27,7 @@ ALLOWED_TOP_DIRS = {
 ALLOWED_TOP_FILES = {
     ".gitignore",
     "AGENTS.md",
+    "AI_POLICY.md",
     "CLAUDE.md",
     "CONTRIBUTING.md",
     "LICENSE",
