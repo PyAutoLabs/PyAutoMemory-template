@@ -1,4 +1,4 @@
-.PHONY: validate validate-literature-citations validate-structure test
+.PHONY: validate validate-literature-citations validate-structure test board
 
 validate: validate-literature-citations validate-structure
 
@@ -10,3 +10,6 @@ validate-structure:
 
 test:
 	python -m pytest tests/ -q
+
+board:
+	python scripts/board.py --md

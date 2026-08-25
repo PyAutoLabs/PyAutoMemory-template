@@ -9,7 +9,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BIBLIOGRAPHY = ROOT / "bibliography" / "pyautomemory.bib"
-DEFAULT_ALIASES = ROOT / "bibliography" / "bibkey_aliases.yaml"
 
 BIBTEX_ENTRY = re.compile(
     r"^\s*@(?!comment\b|string\b|preamble\b)[A-Za-z]+\s*[({]\s*([^,\s]+)\s*,",
@@ -40,11 +39,9 @@ class SourceCitation:
 class CitationValidation:
     bibliography: BibtexInventory
     citations: tuple[SourceCitation, ...]
-    aliases: dict[str, str]
     missing_source_keys: tuple[SourceCitation, ...]
     claim_entries_without_keys: tuple[SourceCitation, ...]
     unreferenced_bibtex_keys: tuple[str, ...]
-    missing_alias_targets: tuple[tuple[str, str], ...]
 
     @property
     def valid(self) -> bool:
@@ -52,7 +49,6 @@ class CitationValidation:
             self.bibliography.duplicates
             or self.missing_source_keys
             or self.claim_entries_without_keys
-            or self.missing_alias_targets
         )
 
 
@@ -115,57 +111,24 @@ def collect_claim_entries_without_keys(
     return tuple(missing)
 
 
-def parse_aliases(text: str) -> dict[str, str]:
-    """Parse the intentionally flat alias-to-canonical YAML mapping."""
-
-    aliases: dict[str, str] = {}
-    content = text.strip()
-    if not content or content == "{}":
-        return aliases
-
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or stripped == "{}":
-            continue
-        if ":" not in stripped:
-            raise ValueError(f"invalid alias mapping on line {line_number}: {line!r}")
-        alias, canonical = (
-            part.strip().strip("'\"") for part in stripped.split(":", 1)
-        )
-        if not alias or not canonical:
-            raise ValueError(f"invalid alias mapping on line {line_number}: {line!r}")
-        aliases[alias] = canonical
-    return aliases
-
-
 def validate_citations(
     bibliography_path: Path = DEFAULT_BIBLIOGRAPHY,
     root: Path = ROOT,
-    aliases_path: Path = DEFAULT_ALIASES,
 ) -> CitationValidation:
     bibliography = parse_bibtex(bibliography_path.read_text(encoding="utf-8"))
     directories = source_directories(root)
     citations = collect_source_citations(directories)
     claim_entries_without_keys = collect_claim_entries_without_keys(directories)
-    aliases = parse_aliases(aliases_path.read_text(encoding="utf-8"))
     cited_keys = {citation.key for citation in citations}
 
     return CitationValidation(
         bibliography=bibliography,
         citations=citations,
-        aliases=aliases,
         missing_source_keys=tuple(
             citation for citation in citations if citation.key not in bibliography.keys
         ),
         claim_entries_without_keys=claim_entries_without_keys,
         unreferenced_bibtex_keys=tuple(sorted(bibliography.keys - cited_keys)),
-        missing_alias_targets=tuple(
-            sorted(
-                (alias, canonical)
-                for alias, canonical in aliases.items()
-                if canonical not in bibliography.keys
-            )
-        ),
     )
 
 
@@ -180,14 +143,13 @@ def _print_keys(label: str, keys: tuple[str, ...], show_all: bool) -> None:
 
 def run_validation(args: argparse.Namespace) -> int:
     try:
-        result = validate_citations(args.bibliography, args.root, args.aliases)
+        result = validate_citations(args.bibliography, args.root)
     except (OSError, ValueError) as error:
         print(f"citation validation error: {error}")
         return 1
 
     print(f"Canonical BibTeX entries: {len(result.bibliography.keys)}")
     print(f"Wiki source entries with canonical keys: {len(result.citations)}")
-    print(f"BibTeX key aliases: {len(result.aliases)}")
     _print_keys(
         "Duplicate canonical BibTeX keys", result.bibliography.duplicates, args.show_all
     )
@@ -203,10 +165,6 @@ def run_validation(args: argparse.Namespace) -> int:
     for citation in result.claim_entries_without_keys:
         print(f"  - {citation.path}:{citation.line}: {citation.key}")
 
-    print(f"Aliases with missing canonical targets: {len(result.missing_alias_targets)}")
-    for alias, canonical in result.missing_alias_targets:
-        print(f"  - {alias} -> {canonical}")
-
     _print_keys(
         "BibTeX entries not referenced by a wiki source entry",
         result.unreferenced_bibtex_keys,
@@ -220,7 +178,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bibliography", type=Path, default=DEFAULT_BIBLIOGRAPHY)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES)
     parser.add_argument("--show-all", action="store_true")
     return parser
 
