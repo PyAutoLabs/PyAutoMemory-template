@@ -48,11 +48,13 @@ the allowlist is in `scripts/validate_structure.py`.
   the organism did.
 - **Workflow state, health, execution** — Mind / Heart / Build respectively.
 
-## This repo is personal
+## Scope: personal research material, out of scope for user-facing repos
 
-PyAutoMemory contains personal research material. **Never reference or copy
-PyAutoMemory content into public or user-facing repos** (libraries,
-workspaces, tutorials, assistants).
+PyAutoMemory holds personal research material. It is a public repo and its
+wiki content is CC BY 4.0 (see LICENSE), but it is **out of scope for the
+user-facing repos** (libraries, workspaces, tutorials, assistants): link to
+it if you must, never inline or copy its content there — user-facing docs
+must stand on their own without it.
 
 <!-- repos_sync:history:begin -->
 ## Never rewrite history

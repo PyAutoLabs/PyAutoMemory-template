@@ -30,11 +30,15 @@ the wiki and note the change in the sub-wiki's `log.md`.
 
 - `sources/*.md` records compact guidance about what claims a paper supports.
 - `../bibliography/pyautomemory.bib` records canonical metadata and keys.
-- `../bibliography/bibkey_aliases.yaml` maps known alternate keys to canonical keys.
 
 Never record local PDF paths or fabricate metadata — source PDFs live
-off-repo. A canonical key is local to PyAutoMemory: resolve it against a
-target project's `.bib` before patching LaTeX. See
+off-repo. One declared exception: a page's frontmatter may carry an
+`archive:` list — the **read-only archival filenames** of the off-repo PDFs
+the 2026-05 import seeded it from (e.g. `Strong_Lens/Suyu2016Holicow.pdf`).
+These are provenance history, never live paths; nothing may resolve or grow
+them — new papers cite the bibliography, not an archive path. A canonical
+key is local to PyAutoMemory: resolve it against a target project's `.bib`
+before patching LaTeX. See
 [`../bibliography/README.md`](../bibliography/README.md) for the workflow.
 
 ## Page types
