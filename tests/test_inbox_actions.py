@@ -318,3 +318,111 @@ def test_add_output_still_parses_as_a_queue_line(tmp_path):
                                  "2026-08-30")
     assert status == "marked"
     assert f"DONE 2026-08-30 — {queued}" in text
+
+
+# --- the freshness stamp ------------------------------------------------------
+# An empty inbox is ambiguous on its own: arXiv was quiet, or the filing broke
+# and the papers were lost. The stamp is what separates the two, so its
+# contract is that it round-trips, replaces rather than accumulates, and never
+# gets in the way of the papers around it.
+def test_stamp_round_trips():
+    text = ia.set_last_digest(INBOX, "2026-08-25")
+    assert ia.last_digest(text) == "2026-08-25"
+
+
+def test_an_unstamped_inbox_reports_none():
+    assert ia.last_digest(INBOX) is None
+
+
+def test_stamp_lands_below_the_separator_and_above_the_papers():
+    lines = ia.set_last_digest(INBOX, "2026-08-25").splitlines()
+    assert lines[lines.index("---") + 1] == "last digest: 2026-08-25"
+    assert lines.index("last digest: 2026-08-25") < lines.index(
+        "2026-08-24 — A model-independent substructure probe — 2608.21253")
+
+
+def test_stamp_is_replaced_not_accumulated():
+    """It is rewritten nightly; a second line would be a slow leak."""
+    text = ia.set_last_digest(ia.set_last_digest(INBOX, "2026-08-24"),
+                              "2026-08-25")
+    assert text.count("last digest:") == 1
+    assert ia.last_digest(text) == "2026-08-25"
+
+
+def test_stamp_is_not_read_back_as_a_paper():
+    """Why the line is not date-first: it must never match INBOX_LINE_RE."""
+    text = ia.set_last_digest(INBOX, "2026-08-25")
+    assert ia.parse_line("last digest: 2026-08-25") is None
+    assert [p["ref"] for p in ia.papers(text)] == ["2608.21253", "2608.11111"]
+
+
+def test_the_sweep_never_ages_the_stamp_out():
+    """Unlike a per-day marker line, this one has nothing to expire."""
+    text = ia.set_last_digest(INBOX, "2026-08-01")
+    swept, dropped = ia.sweep(text, datetime.date(2026, 9, 30))
+    assert ia.last_digest(swept) == "2026-08-01"
+    assert "last digest: 2026-08-01" not in dropped
+
+
+def test_append_still_lands_below_a_stamped_empty_inbox():
+    """The empty-inbox branch appends at EOF — the stamp must stay on top."""
+    empty = ia.set_last_digest("# arXiv inbox\n\nprose\n\n---\n", "2026-08-25")
+    text, n = ia.append(empty, "", [_entry("Fresh", "2608.31337")],
+                        "2026-08-25")
+    assert n == 1
+    lines = text.splitlines()
+    assert lines.index("last digest: 2026-08-25") < lines.index(
+        "2026-08-25 — Fresh — 2608.31337")
+
+
+def test_append_still_lands_below_a_stamped_populated_inbox():
+    text, n = ia.append(ia.set_last_digest(INBOX, "2026-08-25"), "",
+                        [_entry("Fresh", "2608.31337")], "2026-08-25")
+    assert n == 1
+    lines = text.splitlines()
+    assert lines.index("last digest: 2026-08-25") < lines.index(
+        "2026-08-25 — Fresh — 2608.31337")
+
+
+# --- weekday arithmetic -------------------------------------------------------
+# Calendar days overstate the digest's silence: it only runs Mon-Fri, so a
+# Monday board reading Friday's stamp is three days but zero missed runs.
+def test_a_weekend_costs_no_weekdays():
+    friday, monday = "2026-08-21", datetime.date(2026, 8, 24)
+    assert (monday - datetime.date.fromisoformat(friday)).days == 3
+    assert ia.weekdays_since(friday, monday) == 1
+
+
+def test_weekdays_since_counts_the_days_after_the_stamp():
+    assert ia.weekdays_since("2026-08-24", datetime.date(2026, 8, 24)) == 0
+    assert ia.weekdays_since("2026-08-24", datetime.date(2026, 8, 25)) == 1
+    assert ia.weekdays_since("2026-08-24", datetime.date(2026, 8, 28)) == 4
+
+
+def test_a_malformed_stamp_is_not_arithmetic():
+    assert ia.weekdays_since("not-a-date", datetime.date(2026, 8, 25)) == 0
+
+
+# --- the staleness verdict ----------------------------------------------------
+def test_one_missed_weekday_is_not_yet_stale():
+    """Cron jitters later by up to ~3 h, so a single day is reachable clean."""
+    assert ia.INBOX_STALE_WEEKDAYS == 2
+    assert not ia.is_stale("2026-08-24", datetime.date(2026, 8, 25))
+
+
+def test_two_missed_weekdays_is_stale():
+    assert ia.is_stale("2026-08-24", datetime.date(2026, 8, 26))
+
+
+def test_a_missing_stamp_is_not_stale():
+    """spawn.py empties the inbox, so a fresh template has nothing to be late
+    for. Absence of evidence is not evidence of breakage."""
+    assert not ia.is_stale(None, datetime.date(2026, 8, 26))
+
+
+def test_cli_stamp_reports_the_date(tmp_path, capsys):
+    inbox, queue = _write(tmp_path)
+    assert ia.main(["--inbox", str(inbox), "--queue", str(queue),
+                    "--date", "2026-08-25", "stamp"]) == 0
+    assert capsys.readouterr().out.strip() == "stamped:2026-08-25"
+    assert ia.last_digest(inbox.read_text()) == "2026-08-25"

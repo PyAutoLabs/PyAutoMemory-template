@@ -19,10 +19,18 @@ Stdlib-only and idempotent, like ``queue_mark_done.py`` beside it: appending a
 paper already in the inbox (or already in the reading queue) is a no-op, and
 acting on a line that is already gone is a success, not an error.
 
+The module also owns the inbox's **freshness stamp** — one ``last digest:
+<date>`` line the nightly digest rewrites on every run, papers or none. An empty
+inbox is ambiguous without it (arXiv was quiet, or the filing broke and the
+papers were lost); with it, a stamp dated today makes the quiet day *positive
+evidence*, exactly as the ``#papers`` empty-day heartbeat does on the Slack side.
+It is replaced rather than accumulated, so the sweep never has to age it out.
+
 Each subcommand prints exactly one status token on stdout.
 
 Usage:
     python scripts/inbox_actions.py append --papers-file survivors.json
+    python scripts/inbox_actions.py stamp
     python scripts/inbox_actions.py sweep
     python scripts/inbox_actions.py add     --body-file /tmp/issue_body.txt
     python scripts/inbox_actions.py dismiss --body-file /tmp/issue_body.txt
@@ -42,6 +50,13 @@ from pathlib import Path
 #: nothing, so there is no second literal to drift.
 INBOX_WINDOW_DAYS = 7
 
+#: How long the board waits before calling a silent digest broken, in weekdays
+#: (the digest runs Mon-Fri). Two, not one: the nominal fire is 02:00 UTC and
+#: GitHub cron only ever jitters *later* (0-3 h under load), so a board rendered
+#: early can legitimately see yesterday's stamp with nothing wrong. Two weekdays
+#: of silence is a pattern rather than a slip.
+INBOX_STALE_WEEKDAYS = 2
+
 #: Where ➕ sends a paper. The digest is strong-lensing-only, so every inbox
 #: paper routes to one reading-queue section; a multi-section inbox is a later
 #: problem, and this constant is where it starts.
@@ -56,6 +71,11 @@ INBOX_LINE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+—\s+(\S.*)$")
 #: Same ref grammar as board.py's QUEUE_REF_RE — kept in step deliberately.
 REF_RE = re.compile(
     r"^(.*\S)\s+—\s+((?:arXiv:)?\d{4}\.\d{4,5}(?:v\d+)?|https?://\S+)$")
+#: The freshness stamp. Deliberately NOT date-first, so it can never collide
+#: with INBOX_LINE_RE and be read back as a paper.
+STAMP_RE = re.compile(r"^last digest:\s*(\d{4}-\d{2}-\d{2})\s*$")
+#: The prose header ends here; the stamp and the papers live below it.
+SEPARATOR = "---"
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 BODY_LINE_RE = re.compile(r"^line:\s*(.+?)\s*$", re.MULTILINE)
 BODY_FILE_RE = re.compile(r"^file:\s*(.+?)\s*$", re.MULTILINE)
@@ -112,7 +132,66 @@ def days_left(added: str, today: datetime.date) -> int:
     return max(0, INBOX_WINDOW_DAYS - (today - stamp).days)
 
 
+def last_digest(text: str) -> str | None:
+    """The date of the last recorded digest run, or None if never stamped."""
+    for raw in text.splitlines():
+        m = STAMP_RE.match(raw.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def weekdays_since(stamp: str, today: datetime.date) -> int:
+    """Weekdays elapsed since ``stamp``, counting neither endpoint's weekend.
+
+    The digest only runs Mon-Fri, so calendar days overstate its silence: a
+    Monday board reading Friday's stamp is three days but zero *missed runs*.
+    Counts the days strictly after ``stamp`` up to and including ``today``.
+    """
+    try:
+        start = datetime.date.fromisoformat(stamp)
+    except ValueError:
+        return 0
+    n, day = 0, start
+    while day < today:
+        day += datetime.timedelta(days=1)
+        if day.weekday() < 5:
+            n += 1
+    return n
+
+
+def is_stale(stamp: str | None, today: datetime.date) -> bool:
+    """Whether a digest has been silent long enough to suspect it is broken.
+
+    A missing stamp is NOT stale: ``spawn.py`` empties ``arxiv-inbox.md`` for
+    the template repos, so a freshly spawned Memory has never run a digest and
+    has nothing to be late for. Absence of evidence, not evidence of breakage.
+    """
+    if stamp is None:
+        return False
+    return weekdays_since(stamp, today) >= INBOX_STALE_WEEKDAYS
+
+
 # --- transitions --------------------------------------------------------------
+def set_last_digest(inbox_text: str, date: str) -> str:
+    """Record a digest run, replacing any stamp already there.
+
+    Inserted directly below the ``---`` separator when absent, so it sits above
+    the papers: ``append`` places new lines after the last paper (or at EOF when
+    there are none), and never above the stamp under either branch.
+    """
+    lines = inbox_text.rstrip("\n").splitlines()
+    line = f"last digest: {date}"
+    for i, raw in enumerate(lines):
+        if STAMP_RE.match(raw.strip()):
+            lines[i] = line
+            return "\n".join(lines) + "\n"
+    at = next((i + 1 for i, r in enumerate(lines) if r.strip() == SEPARATOR),
+              len(lines))
+    lines[at:at] = [line]
+    return "\n".join(lines) + "\n"
+
+
 def append(inbox_text: str, queue_text: str, entries: list[dict],
            date: str) -> tuple[str, int]:
     """Append papers not already in the inbox or the reading queue.
@@ -244,6 +323,13 @@ def _cmd_append(ns) -> tuple[str, int]:
     return (f"appended:{n}", 0)
 
 
+def _cmd_stamp(ns) -> tuple[str, int]:
+    date = _today(ns).isoformat()
+    inbox = Path(ns.inbox)
+    inbox.write_text(set_last_digest(inbox.read_text(errors="replace"), date))
+    return (f"stamped:{date}", 0)
+
+
 def _cmd_sweep(ns) -> tuple[str, int]:
     inbox = Path(ns.inbox)
     text, dropped = sweep(inbox.read_text(errors="replace"), _today(ns))
@@ -297,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--papers-file", required=True,
                    help="JSON: [{title, ref}] or {\"papers\": [...]}")
     p.set_defaults(fn=_cmd_append)
+
+    p = sub.add_parser("stamp", help="record that the digest ran today")
+    p.set_defaults(fn=_cmd_stamp)
 
     p = sub.add_parser("sweep", help="drop lines past the window")
     p.set_defaults(fn=_cmd_sweep)

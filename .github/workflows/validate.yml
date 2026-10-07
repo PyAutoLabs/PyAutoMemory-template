@@ -22,4 +22,14 @@ jobs:
           python-version: "3.12"
       - run: pip install pytest
       - run: make validate
+      # The wikilink leg of `make validate` is a ratchet: it fails only on an
+      # unresolved target that is not in scripts/wikilink_baseline.txt, because
+      # a link with no page yet is legal (wiki/CLAUDE.md, "Cross-references").
+      # This step re-runs it with --list so the log always carries the current
+      # wanted-page backlog — and, when the ratchet trips, shows how often the
+      # offending slug is referenced. `if: always()` so a failure above still
+      # gets the listing.
+      - name: Wikilink report
+        if: always()
+        run: python scripts/validate_wikilinks.py --list
       - run: make test

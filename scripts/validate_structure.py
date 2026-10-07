@@ -17,10 +17,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 ALLOWED_TOP_DIRS = {
+    ".claude",  # agent tooling (session hooks, settings), not content
     ".git",
     ".github",
     "bibliography",
     "scripts",
+    "skills",  # organ-owned agent skills (e.g. skills/catch_up), like Mind's skills/
     "tests",
     "wiki",
 }
@@ -35,6 +37,7 @@ ALLOWED_TOP_FILES = {
     "README.md",
     "SPAWNED_FROM",  # provenance marker stamped into spawned templates
     "arxiv-inbox.md",
+    "arxiv-interests.md",
     "index.md",
     "logo.png",
     "reading-queue.md",

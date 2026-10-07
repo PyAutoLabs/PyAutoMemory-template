@@ -1,7 +1,7 @@
 # PyAutoMemory — index
 
 Top-level navigation across the sub-wikis. Every sub-wiki is self-contained
-and follows the schema defined in `wiki/CLAUDE.md`.
+and follows the schema defined in `wiki/AGENTS.md`.
 
 | Wiki | Covers |
 |------|--------|

@@ -15,7 +15,7 @@ personal library in 2026-07 — the merge audit is in git history.)
 2. Search `pyautomemory.bib` by DOI, arXiv ID, and title. Reuse the existing canonical key;
    otherwise add verified metadata under a unique, stable author-year key.
 3. Add a compact section to the relevant `../wiki/<domain>/sources/*.md` using the inherited
-   schema in [`../wiki/CLAUDE.md`](../wiki/CLAUDE.md).
+   schema in [`../wiki/AGENTS.md`](../wiki/AGENTS.md).
 4. Add concept/entity links only where the paper materially supports existing text.
 5. Run `make validate-literature-citations`.
 

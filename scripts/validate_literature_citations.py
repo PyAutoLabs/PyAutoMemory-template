@@ -77,8 +77,21 @@ def extract_canonical_keys(
     )
 
 
+#: Folders whose ``*.md`` carry per-paper sections. ``seed/`` is the 2026-05
+#: import's unverified half, split out of ``sources/`` so nothing cites it by
+#: accident — but it is walked exactly like ``sources/``: a seed page is where
+#: a TODO key is most likely to be, and a validator that skipped it would go
+#: quiet on the pages that need it most.
+SOURCE_FOLDERS = ("sources", "seed")
+
+
 def source_directories(root: Path) -> tuple[Path, ...]:
-    return tuple(sorted(path for path in root.glob("wiki/*/sources") if path.is_dir()))
+    return tuple(sorted(
+        path
+        for folder in SOURCE_FOLDERS
+        for path in root.glob(f"wiki/*/{folder}")
+        if path.is_dir()
+    ))
 
 
 def collect_source_citations(directories: tuple[Path, ...]) -> tuple[SourceCitation, ...]:

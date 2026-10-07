@@ -4,7 +4,7 @@ Every sub-wiki under `wiki/` gives an AI assistant broad scientific context
 for one domain. They follow Karpathy's "LLM Wiki" pattern: concise,
 cross-linked pages are read at query time, while canonical citation metadata
 lives separately in [`../bibliography/`](../bibliography/README.md). This
-file defines the schema once; each sub-wiki's own `CLAUDE.md` diverges only
+file defines the schema once; each sub-wiki's own `AGENTS.md` diverges only
 on scope.
 
 ## Layout
@@ -12,15 +12,16 @@ on scope.
 ```
 PyAutoMemory/                  # repo root
 ├── wiki/                     # all sub-wikis (in git)
-│   ├── CLAUDE.md             # this file — schema + usage rules
+│   ├── AGENTS.md             # this file — schema + usage rules
 │   └── <domain>/             # one domain per sub-wiki, e.g. lensing/
-│       ├── CLAUDE.md         # the sub-wiki's scope notes
+│       ├── AGENTS.md         # the sub-wiki's scope notes
 │       ├── index.md          # the sub-wiki's own navigation
 │       ├── log.md            # append-only compilation log
 │       ├── concepts/         # one topic per page — the science
 │       ├── entities/         # named things: surveys, instruments, software
-│       └── sources/          # compact claim support (one paper = one section)
-└── bibliography/             # canonical BibTeX, aliases, citation tooling
+│       ├── sources/          # compact claim support (one paper = one section)
+│       └── seed/             # unverified 2026-05 import, not citeable yet
+└── bibliography/             # canonical BibTeX and citation tooling
 ```
 
 Papers are the ground truth; wiki pages are syntheses. If they disagree, update
@@ -29,6 +30,8 @@ the wiki and note the change in the sub-wiki's `log.md`.
 ## References and citation metadata
 
 - `sources/*.md` records compact guidance about what claims a paper supports.
+- `seed/*.md` is the same shape, unverified: the 2026-05 import's stubs, held
+  apart so nothing cites them by accident.
 - `../bibliography/pyautomemory.bib` records canonical metadata and keys.
 
 Never record local PDF paths or fabricate metadata — source PDFs live
@@ -48,6 +51,7 @@ before patching LaTeX. See
 | Concept     | `concepts/`  | One scientific concept (e.g. mass-sheet degeneracy)   |
 | Entity      | `entities/`  | One named thing (survey, lens, code, collaboration)   |
 | Sources     | `sources/`   | Claim support for one topic, one section per paper    |
+| Seed        | `seed/`      | Source pages from the 2026-05 import whose every entry is still a filename-inferred stub (`Canonical BibTeX key: TODO`) — never cite one until the paper is verified and the entry promoted into `sources/` |
 | Index/log   | root         | Navigation and provenance                             |
 
 ## Naming
@@ -61,8 +65,11 @@ before patching LaTeX. See
 
 Use `[[page-slug]]` for wiki-internal links — for example
 `[[mass-sheet-degeneracy]]` or `[[h0licow]]`. Slugs match the filename without
-`.md`. A `[[link]]` that has no target file yet is fine — it marks a future
-page to write.
+`.md`; a `sources/` page also answers to `[[sources-<topic>]]` and a `seed/`
+page to `[[seed-<topic>]]`. A `[[link]]` that has no target file yet is fine —
+it marks a future page to write, and `scripts/validate_wikilinks.py` ratchets
+that backlog (it fails only on a *new* unresolved target, against
+`scripts/wikilink_baseline.txt`).
 
 External references use verified DOI, arXiv, journal, or author/year/title
 metadata, never a local path.
@@ -154,6 +161,7 @@ abstracts or infer claims from filenames. Add a TODO when support is unverified.
 
 ## Adding a sub-wiki
 
-Create `wiki/<domain>/` with its own `CLAUDE.md` (scope notes only — this
-schema is inherited, not copied), `index.md`, `log.md`, and the three page
-folders. Give it a row in the repo-root `index.md` and `README.md` tables.
+Create `wiki/<domain>/` with its own `AGENTS.md` (scope notes only — this
+schema is inherited, not copied), `index.md`, `log.md`, and the page folders it
+needs (`seed/` only if it is taking an unverified import). Give it a row in the
+repo-root `index.md` and `README.md` tables.

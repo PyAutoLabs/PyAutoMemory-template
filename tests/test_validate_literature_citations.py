@@ -75,3 +75,22 @@ def test_detect_claim_entry_without_key(tmp_path):
         ("Alpha 2024 — result", 1)
     ]
     assert not result.valid
+
+
+def test_seed_pages_are_validated_like_sources(tmp_path):
+    # `seed/` holds the 2026-05 import's unverified source pages. It is where a
+    # broken canonical key is most likely to sit, so the validator must walk it
+    # rather than go quiet on the half of the wiki that needs it most.
+    bibliography, _ = _fixture_paths(tmp_path)
+    seed = tmp_path / "wiki" / "example" / "seed"
+    seed.mkdir(parents=True)
+    (seed / "topic.md").write_text(
+        "**Canonical BibTeX key:** `Missing2025`\n", encoding="utf-8"
+    )
+
+    result = validate_citations(bibliography, tmp_path)
+
+    assert [citation.key for citation in result.missing_source_keys] == [
+        "Missing2025"
+    ]
+    assert not result.valid
