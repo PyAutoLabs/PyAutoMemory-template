@@ -1613,11 +1613,7 @@ def _render_html(snapshot: dict) -> str:
     if filing_items:
         navigation.insert(0, {"href": "#filings", "label": "Filings awaiting merge", "count": len(filing_items)})
     hero = t_.hero(BOARD_KEY, "Dashboard", _LEDE, navigation=navigation)
-    # The way back from the Pages board to the repository front door; the
-    # segment drops out when the snapshot carries no owner/repo.
     repo_url = _repo_url(snapshot)
-    github_link = (f' · <a href="{repo_url}/blob/main/README.md">'
-                   "GitHub Page</a>" if repo_url else "")
     panel = t_.orchestration_panel(
         "memory", "", "", CHECKIN_PROMPT,
         work_links=([{"label": snapshot["repo"], "href": repo_url}] if repo_url else []),
@@ -1642,7 +1638,7 @@ def _render_html(snapshot: dict) -> str:
 {hero}
 {panel}
 <section id="catch-up">{_catch_up_html(snapshot)}</section>
-<p class="muted mdsrc"><a href="dashboard.md">markdown version</a>{github_link}{onetap}</p>
+<p class="muted mdsrc"><a href="dashboard.md">markdown version</a>{onetap}</p>
 <div id="toast"></div>
 {filings_block}
 <h2 id='arxiv-inbox'>arXiv inbox <span class="muted">(suggested overnight — un-acted papers
