@@ -53,6 +53,14 @@ human confirms once, and the chosen papers are filed in one PR.
   failed approaches) lives in **PyAutoMind** (the `complete/<YYYY>/<MM>/`
   records, GitHub issues), not here. Memory = what the science says; Mind = what
   the organism did.
+- **Inference and profiling campaign records** — campaign intent, coverage and
+  evidence presentation belong to **PyAutoInsight** and **PyAutoPulse**
+  respectively. Their `*_inference` / `*_profiling` projects own protocols,
+  detailed results and provenance; Cortex retains scientific run records and
+  human conclusions. Keep short pointers and reusable methodological lessons
+  here, not duplicate counts, per-search statuses, timing tables or pending work.
+  Route by information type, not permanence. Before removing an existing summary,
+  verify a merged, reachable destination preserves its evidence and provenance.
 - **Workflow state, health, execution** — Mind / Heart / Build respectively.
 
 ## Scope: personal research material, out of scope for user-facing repos

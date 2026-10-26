@@ -184,10 +184,11 @@ def test_work_queue_prompts_reference_the_documented_workflow(tmp_path):
 
 def test_paper_links_and_issue_actions(tmp_path):
     html = board.render(_snap_with_remote(tmp_path), "html")
-    # the header links the markdown twin and the repository front door
-    assert '<a href="dashboard.md">markdown version</a>' in html
-    assert ('<a href="https://github.com/PyAutoLabs/PyAutoMemory/blob/main/'
-            'README.md">GitHub Page</a>') in html
+    # Shared section_layout renders the Markdown source as an accessible icon.
+    markdown_link = re.search(r'<a\b[^>]*href="dashboard.md"[^>]*>', html)
+    assert markdown_link is not None
+    assert 'aria-label="Markdown version"' in markdown_link.group(0)
+    assert 'GitHub Page</a>' not in html
     # ref'd paper → its abstract page; bare title → an arXiv title search
     assert "https://arxiv.org/abs/2406.01234" in html
     assert ("https://arxiv.org/search/?searchtype=title&amp;query=Title%20One"
@@ -751,8 +752,8 @@ def test_a_failed_ls_remote_is_an_empty_list_not_an_error(monkeypatch):
     assert board._pending_filings() == []
 
 
-def test_pending_filings_render_above_the_inbox_with_a_pr_link(tmp_path):
-    """A filing on a branch is not in memory: the board says so, first, and
+def test_pending_filings_render_in_their_own_section_with_a_pr_link(tmp_path):
+    """A filing on a branch is not in memory: the board says so and
     hands out the one tap that finishes it."""
     snap = _snap_with_remote(tmp_path)
     snap["filings"] = [{"issue": 91, "branch": "queue-filing/issue-91"}]
@@ -761,7 +762,7 @@ def test_pending_filings_render_above_the_inbox_with_a_pr_link(tmp_path):
         assert "compare/main...queue-filing/issue-91?expand=1" in text
         assert "/issues/91" in text
         if '<!doctype html>' in text:
-            assert text.index("id='filings'") < text.index("id='arxiv-inbox'")
+            assert text.index("id='filings'") > text.index("id='arxiv-inbox'")
         else:
             assert text.index("Filings awaiting merge") < text.index("arXiv inbox")
 
@@ -945,11 +946,12 @@ def test_last_ingested_is_collected_from_a_scope_section(tmp_path):
     assert board.collect(root)["last_ingested"] == "2026-09-01"
 
 
-def test_no_banner_under_the_threshold(tmp_path):
+def test_catchup_remains_available_under_the_threshold(tmp_path):
     snap = _banner_snap(tmp_path, "2026-09-24")  # 6 days
     assert board._days_since_ingest(snap) == 6
     assert "lost for a while" not in board.render(snap, "md")
-    assert "class='catchup'" not in board.render(snap, "html")
+    assert "Catch up from 2026-09-24 · next due 2026-10-01." in board.render(snap, "html")
+    assert 'href="#catch-up"' in board.render(snap, "html")
     assert board.to_state(snap)["days_since_ingest"] == 6
 
 
@@ -957,21 +959,20 @@ def test_banner_at_the_threshold_carries_the_day_count(tmp_path):
     snap = _banner_snap(tmp_path, "2026-09-23")  # exactly CATCH_UP_DAYS
     assert board.CATCH_UP_DAYS == 7
     md = board.render(snap, "md")
-    assert "**Strong-lensing catch-up due**" in md
-    assert "2026-09-23 (7 days ago)" in md
-    assert "after 7 days" in md
+    assert "## Catch up" in md
+    assert "Catch up from 2026-09-23 · due 2026-09-30." in md
     assert "`Read PyAutoMemory/skills/catch_up/SKILL.md and follow the catch_up skill with arguments: lensing.`" in md
     # Top of the markdown: before the contents line.
-    assert md.index("Strong-lensing catch-up due") < md.index("_Contents")
+    assert md.index("## Catch up") < md.index("_Contents")
 
 
 def test_catchup_html_follows_banner_and_navigation_with_a_copy_button(tmp_path):
     snap = _banner_snap(tmp_path, "2026-09-11")
     page = board.render(snap, "html")
-    assert "<em>…so… I&#x27;ve been lost for a while</em>" in page
-    assert "2026-09-11 (19 days ago)" in page
+    assert "lost for a while" not in page
+    assert "Catch up from 2026-09-11 · due 2026-09-18." in page
     assert 'data-cmd="Read PyAutoMemory/skills/catch_up/SKILL.md and follow the catch_up skill with arguments: lensing."' in page
-    assert page.index('class="hero"') < page.index('class="board-nav"') < page.index("class='catchup'")
+    assert page.index('class="hero"') < page.index('class="board-nav"') < page.index('id="catch-up"')
     assert board.to_state(snap)["days_since_ingest"] == 19
 
 
@@ -979,7 +980,7 @@ def test_unknown_banner_when_nothing_is_on_record(tmp_path):
     snap = _banner_snap(tmp_path, None)
     assert board._days_since_ingest(snap) is None
     assert "lost for a while" not in board.render(snap, "md")
-    assert "Strong-lensing freshness unknown" in board.render(snap, "html")
+    assert "Catch-up start date unknown." in board.render(snap, "html")
     assert board.to_state(snap)["days_since_ingest"] is None
 
 
@@ -997,8 +998,8 @@ def test_lensing_catch_up_threshold_has_one_model_for_every_surface(tmp_path, ag
         assert not rows
     else:
         assert len(rows) == 1 and rows[0]["reason"] == model["reason"]
-        assert model["reason"] in board.render(snap, "md")
-        assert model["reason"] in board.render(snap, "html")
+        assert board._catch_up_summary(snap) in board.render(snap, "md")
+        assert board._catch_up_summary(snap) in board.render(snap, "html")
         assert rows[0]["actions"][0]["target"] == "Read PyAutoMemory/skills/catch_up/SKILL.md and follow the catch_up skill with arguments: lensing."
         assert rows[0]["actions"][0]["safety"] == "scientific_judgement"
         assert "requires_human_decision" not in rows[0]  # No invented choice.
@@ -1181,3 +1182,15 @@ def test_panel_refresh_uses_capture_not_ingest_date(tmp_path, monkeypatch):
     board.render(snap, "html")
     assert calls[0]["refreshed_at"] == snap["generated"]
     assert calls[0]["refresh_url"] == "https://github.com/SomeOrg/MemoryWork/actions/workflows/knowledge_board.yml"
+
+
+def test_inbox_is_first_content_after_checkin(tmp_path):
+    page = board.render(_snap_with_remote(tmp_path), "html")
+    between = page.split('id="orchestration-memory"', 1)[1].split("id='arxiv-inbox'", 1)[0]
+    assert 'id="catch-up"' not in between
+    assert "mdsrc" not in between
+    assert "id='onetap'" not in between
+    assert "id='filings'" not in between
+    assert page.index("id='arxiv-inbox'") < page.index("id='onetap'") < page.index("id='arxiv-interests'")
+    assert "<code>Read PyAutoMemory/skills/catch_up" not in page
+    assert "Copy catch-up prompt" in page

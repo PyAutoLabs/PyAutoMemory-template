@@ -92,7 +92,6 @@ import catch_up  # noqa: E402
 #: holds everything that was missed — git history does, which is exactly what
 #: ``scripts/catch_up.py`` reads back.
 CATCH_UP_DAYS = 7
-CATCH_UP_LYRIC = "…so… I've been lost for a while"  # Fred again..
 CATCH_UP_CMD = "Read PyAutoMemory/skills/catch_up/SKILL.md and follow the catch_up skill with arguments: lensing."
 
 # The family look lives once, in the Brain (``board/_theme.py``): the
@@ -701,27 +700,23 @@ def _catch_up_due(snapshot: dict) -> int | None:
     return model["age_days"] if model["state"] == "stale" else None
 
 
-def _catch_up_md(snapshot: dict) -> list[str]:
+def _catch_up_summary(snapshot: dict) -> str:
     model = _lensing_catch_up(snapshot)
-    if model["state"] == "healthy":
-        return []
-    title = "Strong-lensing catch-up due" if model["state"] == "stale" else "Strong-lensing freshness unknown"
-    return [f"> **{title}**", f"> {model['reason']}",
-            f"> Next: `{CATCH_UP_CMD}` — human-reviewed paper selection.", ""]
+    if model["state"] == "unknown":
+        return "Catch-up start date unknown."
+    due = model["due_at"][:10]
+    status = "due" if model["state"] == "stale" else "next due"
+    return f"Catch up from {model['last_activity']} · {status} {due}."
+
+
+def _catch_up_md(snapshot: dict) -> list[str]:
+    return ["## Catch up", "", _catch_up_summary(snapshot), "",
+            f"`{CATCH_UP_CMD}`", ""]
 
 
 def _catch_up_html(snapshot: dict) -> str:
-    model = _lensing_catch_up(snapshot)
-    if model["state"] == "healthy":
-        return ""
-    title = "Strong-lensing catch-up due" if model["state"] == "stale" else "Strong-lensing freshness unknown"
-    lyric = (f"<p class='lyric'><em>{_html.escape(CATCH_UP_LYRIC)}</em></p>"
-             if model["state"] == "stale" else "")
-    return (f"<section class='catchup'>{lyric}<p><strong>{title}</strong></p>"
-            f"<p>{_html.escape(model['reason'])}</p>"
-            f"<p><code>{_html.escape(CATCH_UP_CMD)}</code> "
-            f"{_copy_btn(CATCH_UP_CMD, 'copy: catch up on strong lensing')} "
-            "<span class='muted'>Human-reviewed paper selection</span></p></section>")
+    return (f"<p>{_html.escape(_catch_up_summary(snapshot))}</p>"
+            f"{_copy_btn(CATCH_UP_CMD, 'Copy catch-up prompt')}")
 
 
 def _totals(snapshot: dict) -> dict:
@@ -1163,9 +1158,6 @@ a.act.busy{opacity:.5;pointer-events:none}
  color:var(--bg);opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
 #toast.show{opacity:1}
 #toast.bad{background:var(--warn)}
-.catchup{border-left:3px solid var(--warn);padding:.4em .9em;margin:0 0 1em}
-.catchup p{margin:.25em 0}
-.catchup .lyric{color:var(--warn)}
 """
 
 # The shared copy handler is delegated, so a chip inside a <summary> would
@@ -1592,9 +1584,7 @@ def _render_html(snapshot: dict) -> str:
         filing_items.append(
             f"<li>{issue_link} <span class='meta'>"
             f"{_html.escape(f['branch'])}</span>{pr}</li>")
-    # Above everything else when present, absent otherwise: it is the one
-    # section that is a human's merge, and an empty "nothing waiting" line
-    # would only teach the eye to skip it.
+    # Keep pending filings in their own navigable section when present.
     filings_block = (
         f"<h2 id='filings'>Filings awaiting merge <span class=\"muted\">({len(filing_items)} "
         f"on a branch, not yet in memory — merge the PR to finish the "
@@ -1608,16 +1598,11 @@ def _render_html(snapshot: dict) -> str:
         {"href": "#citation-work", "label": "To cite", "count": t["todo"]},
         {"href": "#sub-wikis", "label": "Pages", "count": t["pages"], "context": f"{pct}% cited"},
     ]
-    if _catch_up_html(snapshot):
-        navigation.insert(0, {"href": "#catch-up", "label": "Catch up"})
+    navigation.append({"href": "#catch-up", "label": "Catch up"})
     if filing_items:
-        navigation.insert(0, {"href": "#filings", "label": "Filings awaiting merge", "count": len(filing_items)})
+        navigation.append({"href": "#filings", "label": "Filings awaiting merge", "count": len(filing_items)})
     hero = t_.hero(BOARD_KEY, "Dashboard", _LEDE, navigation=navigation)
-    # The way back from the Pages board to the repository front door; the
-    # segment drops out when the snapshot carries no owner/repo.
     repo_url = _repo_url(snapshot)
-    github_link = (f' · <a href="{repo_url}/blob/main/README.md">'
-                   "GitHub Page</a>" if repo_url else "")
     panel = t_.orchestration_panel(
         "memory", "", "", CHECKIN_PROMPT,
         work_links=([{"label": snapshot["repo"], "href": repo_url}] if repo_url else []),
@@ -1641,12 +1626,9 @@ def _render_html(snapshot: dict) -> str:
 <body{body_attrs}>
 {hero}
 {panel}
-<section id="catch-up">{_catch_up_html(snapshot)}</section>
-<p class="muted mdsrc"><a href="dashboard.md">markdown version</a>{github_link}{onetap}</p>
-<div id="toast"></div>
-{filings_block}
 <h2 id='arxiv-inbox'>arXiv inbox <span class="muted">(suggested overnight — un-acted papers
  lapse after {inbox_actions.INBOX_WINDOW_DAYS} days)</span></h2>
+<div class="inbox-tools">{onetap.removeprefix(" · ")}</div>
 {inbox_block}
 <h2 id='arxiv-interests'>arXiv interests <span class="muted">(everything that is not strong
  lensing — one day's ten at a time; \U0001f9f9 clears the day and shows the
@@ -1662,8 +1644,12 @@ def _render_html(snapshot: dict) -> str:
 <h2 id='sub-wikis'>Sub-wikis <span class="muted">({snapshot.get('bib_entries', 0)} bibliography
  entries · {snapshot.get('links', {}).get('wanted', 0)} wanted pages)</span></h2>
 <table class="recent">{''.join(wiki_rows)}</table>
+<h2 id="catch-up">Catch up</h2>
+{_catch_up_html(snapshot)}
+{filings_block}
 {_boards_nav(snapshot)}
-<footer>Rendered by <code>scripts/board.py</code> from the checkout —
+<div id="toast"></div>
+<footer><a href="dashboard.md">markdown version</a> · Rendered by <code>scripts/board.py</code> from the checkout —
 nothing here is committed; generated
 {_html.escape(str(snapshot.get('generated') or '?'))}.</footer>
 <script>{t_.JS}{_EXTRA_JS}</script>
