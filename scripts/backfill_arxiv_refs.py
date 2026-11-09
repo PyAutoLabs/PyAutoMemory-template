@@ -19,6 +19,14 @@ have (a journal-only paper, a thesis, a talk) are simply never matched and are
 re-attempted each run; that is the cost of holding no per-line failure state,
 and it is bounded by ``--limit``.
 
+A *transport* failure is a different thing from a non-match and is reported as
+one. ``arxiv_refs`` retries 429/406/5xx and network errors along a back-off
+ladder honouring ``Retry-After``; a lookup that still gets no answer raises
+``ArxivAPIError``, which this script counts as ``api_failed`` (never as
+``unmatched``), stops the run on, never NOTE-marks, and turns into a non-zero
+exit — so an arXiv outage goes red instead of logging "N ref-less, 0 resolved"
+(2026-09-14..18, when this job ran green every night through 429s and 406s).
+
 Run by ``.github/workflows/arxiv_refs.yml`` (a checkout has no arXiv access
 inside a sandboxed session; CI does). Locally:
 
@@ -118,12 +126,21 @@ def backfill(root: Path, *, write: bool, limit: int, mark_unresolved: bool = Fal
              sleep=time.sleep, log=print) -> dict:
     """Resolve up to `limit` ref-less titles across the queue and the inbox.
 
-    With `mark_unresolved`, a line that fails its lookup is also `NOTE `-marked
-    so no later run asks about it again — a human-driven cleanup, never the
-    nightly's own decision (see :func:`mark_unresolved_line`).
+    With `mark_unresolved`, a line that arXiv answered for but could not
+    uniquely identify is also `NOTE `-marked so no later run asks about it
+    again — a human-driven cleanup, never the nightly's own decision (see
+    :func:`mark_unresolved_line`). A line whose lookup failed on *transport*
+    is never marked: a NOTE-mark is permanent and must only ever follow an
+    actual answer from arXiv.
+
+    Stats: ``matched``/``unmatched`` count answers; ``api_failed`` counts
+    lookups that got no answer after the retry ladder. The first such failure
+    stops the run (every later lookup would hit the same dead endpoint), so
+    ``api_failed`` is 0 or 1 and ``unattempted`` counts the titles left behind
+    in that file within `limit` (later files are not opened).
     """
     stats = {"scanned": 0, "matched": 0, "unmatched": 0, "api_failed": 0,
-             "marked": 0, "files": []}
+             "unattempted": 0, "marked": 0, "files": []}
     budget = limit
     api_down = False
     for name in TARGETS:
@@ -134,7 +151,7 @@ def backfill(root: Path, *, write: bool, limit: int, mark_unresolved: bool = Fal
         todo = candidates("\n".join(lines), name)
         stats["scanned"] += len(todo)
         changed = file_marked = 0
-        for idx, title in todo:
+        for n, (idx, title) in enumerate(todo):
             if budget <= 0:
                 break
             budget -= 1
@@ -146,8 +163,9 @@ def backfill(root: Path, *, write: bool, limit: int, mark_unresolved: bool = Fal
                 # --mark-unresolved must never turn an outage into permanent
                 # NOTE markers.
                 stats["api_failed"] += 1
+                stats["unattempted"] += min(len(todo) - n - 1, budget)
                 api_down = True
-                log(f"  ! arXiv API failure   {title[:90]} ({e})")
+                log(f"  ! arXiv API failure  {title[:90]} ({e})")
                 break
             if ref:
                 lines[idx] = apply_ref(lines[idx], ref)
@@ -173,7 +191,8 @@ def backfill(root: Path, *, write: bool, limit: int, mark_unresolved: bool = Fal
             if write:
                 path.write_text("\n".join(lines) + "\n")
         marked = f", {file_marked} NOTE-marked" if file_marked else ""
-        failed = f", {stats['api_failed']} API failure" if stats["api_failed"] else ""
+        failed = (f", {stats['api_failed']} API failure — run stopped"
+                  if api_down else "")
         log(f"{name}: {len(todo)} ref-less, {changed - file_marked} resolved"
             f"{marked}{failed}{'' if write else ' (dry run — nothing written)'}")
         if api_down:
@@ -199,12 +218,20 @@ def main(argv: list[str] | None = None) -> int:
     stats = backfill(args.root, write=args.write, limit=args.limit,
                      mark_unresolved=args.mark_unresolved)
     marked = f", {stats['marked']} NOTE-marked" if stats["marked"] else ""
-    failed = f", {stats['api_failed']} API failure" if stats["api_failed"] else ""
+    failed = (f", {stats['api_failed']} arXiv API failure "
+              f"({stats.get('unattempted', 0)} more not attempted)"
+              if stats["api_failed"] else "")
     print(f"\n{stats['matched']} resolved, {stats['unmatched']} unresolved"
           f"{marked}{failed}, {stats['scanned']} ref-less lines in total.")
+    if stats["api_failed"]:
+        print("ARXIV API FAILURE: a lookup got no answer after the retry ladder; "
+              "the run stopped there. Unresolved counts above are answers only "
+              "— nothing was NOTE-marked on a failed lookup.")
     # A genuine no-match is normal and stays exit 0. A transport failure is a
-    # broken run: after _api_query has already exhausted its retry ladder we
-    # stop rather than misreporting the whole queue as unresolved.
+    # broken run: by the time it surfaces, _api_query has spent its whole retry
+    # ladder and the run has stopped, so transport failure is the outcome for
+    # every lookup after it — the dominant one. Exit non-zero so the job goes
+    # red; the workflow still commits whatever resolved before the failure.
     return 1 if stats["api_failed"] else 0
 
 
