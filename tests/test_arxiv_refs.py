@@ -219,6 +219,139 @@ def test_api_query_falls_back_to_curl_on_urllib_406(monkeypatch):
     assert len(seen) == 1
 
 
+def test_witness_a_429_is_an_api_failure_not_a_non_match(tmp_path):
+    """Witness for the 2026-09-14..18 outage: an arXiv 429 used to come back
+    from resolve_title() as None — "no unique match" — so the backfill logged a
+    cheerful non-match, exited 0, and --mark-unresolved would have NOTE-marked
+    the line for good. It must surface as a transport failure instead."""
+    def throttled(params):
+        raise urllib.error.HTTPError(
+            arxiv_refs.API_URL, 429, "Too Many Requests",
+            {"Retry-After": "30"}, None)
+
+    with pytest.raises(arxiv_refs.ArxivAPIError):
+        arxiv_refs.resolve_title("A Lensed Quasar Survey", query=throttled)
+
+    # …and through the backfill: counted as api_failed, never unmatched,
+    # never NOTE-marked, and the run exits non-zero.
+    root = _tree(tmp_path)
+    before = (root / "reading-queue.md").read_text()
+
+    def resolve(title):
+        return arxiv_refs.resolve_title(title, query=throttled)
+
+    stats = backfill.backfill(root, write=True, limit=10,
+                              mark_unresolved=True, resolve=resolve,
+                              sleep=lambda _: None, log=lambda *a: None)
+    assert stats["api_failed"] == 1
+    assert stats["unmatched"] == 0 and stats["marked"] == 0
+    assert (root / "reading-queue.md").read_text() == before
+
+
+def test_main_exits_nonzero_on_a_real_429_run(monkeypatch, tmp_path, capsys):
+    root = _tree(tmp_path)
+
+    def throttled(params):
+        raise _http_error(429)
+
+    real = backfill.backfill
+    monkeypatch.setattr(
+        backfill, "backfill",
+        lambda *a, **kw: real(
+            *a, resolve=lambda t: arxiv_refs.resolve_title(t, query=throttled),
+            sleep=lambda _: None, **kw))
+    assert backfill.main(["--root", str(root), "--write"]) == 1
+    out = capsys.readouterr().out
+    assert "ARXIV API FAILURE" in out
+    assert "0 unresolved, 1 arXiv API failure (1 more not attempted)" in out
+
+
+def _http_error(code, retry_after=None):
+    headers = {"Retry-After": retry_after} if retry_after else {}
+    return urllib.error.HTTPError(arxiv_refs.API_URL, code, "x", headers, None)
+
+
+def _scripted(monkeypatch, *outcomes):
+    """Replace the single HTTP attempt with a script of errors/bodies."""
+    queue = list(outcomes)
+    calls = []
+
+    def once(url):
+        calls.append(url)
+        out = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    monkeypatch.setattr(arxiv_refs, "_request_once", once)
+    return calls
+
+
+def test_api_query_backs_off_on_429_and_honours_retry_after(monkeypatch):
+    """The retry ladder, without sleeping through it: `sleep` is injected."""
+    _scripted(monkeypatch, _http_error(429, "30"), _http_error(503), b"<feed/>")
+    slept = []
+    assert arxiv_refs._api_query({"search_query": "all:x"},
+                                 delays=(5, 15, 45),
+                                 sleep=slept.append) == b"<feed/>"
+    # Retry-After 30 beats the 5 s step (capped at the ladder's longest, 45);
+    # the 503 carries none and takes the second step.
+    assert slept == [30, 15]
+
+
+def test_api_query_retries_406_as_edge_mitigation(monkeypatch):
+    # _request_once already tried curl for this 406; it is still throttling.
+    _scripted(monkeypatch, _http_error(406), b"<feed/>")
+    slept = []
+    assert arxiv_refs._api_query({}, delays=(5,), sleep=slept.append) == \
+        b"<feed/>"
+    assert slept == [5]
+
+
+def test_api_query_caps_a_hostile_retry_after(monkeypatch):
+    _scripted(monkeypatch, _http_error(429, "99999"), b"<feed/>")
+    slept = []
+    arxiv_refs._api_query({}, delays=(5, 15), sleep=slept.append)
+    assert slept == [15]
+
+
+def test_api_query_raises_api_error_once_the_ladder_is_spent(monkeypatch):
+    calls = _scripted(monkeypatch, _http_error(429))
+    slept = []
+    with pytest.raises(arxiv_refs.ArxivAPIError):
+        arxiv_refs._api_query({}, delays=(1, 2, 3), sleep=slept.append)
+    assert len(calls) == 4 and slept == [1, 2, 3]
+
+
+def test_api_query_does_not_retry_a_non_transient_status(monkeypatch):
+    calls = _scripted(monkeypatch, _http_error(400))
+    slept = []
+    with pytest.raises(arxiv_refs.ArxivAPIError):
+        arxiv_refs._api_query({}, delays=(1, 2), sleep=slept.append)
+    assert len(calls) == 1 and slept == []
+
+
+def test_api_query_retries_network_errors(monkeypatch):
+    _scripted(monkeypatch, urllib.error.URLError("dns"), TimeoutError("slow"),
+              b"<feed/>")
+    slept = []
+    assert arxiv_refs._api_query({}, delays=(1, 2), sleep=slept.append) == \
+        b"<feed/>"
+    assert slept == [1, 2]
+
+
+def test_an_unparseable_body_is_an_api_failure_not_a_non_match():
+    with pytest.raises(arxiv_refs.ArxivAPIError):
+        arxiv_refs.resolve_title("A Lensed Quasar Survey",
+                                 query=lambda p: b"<html>edge error")
+
+
+def test_none_still_means_arxiv_answered_with_no_unique_match():
+    assert arxiv_refs.resolve_title(
+        "A Lensed Quasar Survey",
+        query=lambda p: _atom(("2608.1", "Something Else"))) is None
+
+
 # --- the backfill -------------------------------------------------------------
 QUEUE = ("# Reading queue\n\nprose that is not a paper\n\n---\n\n"
          "## Strong Lensing\n"

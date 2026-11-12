@@ -31,6 +31,7 @@ is an *arXiv* question. They are deliberately separate.
 
 from __future__ import annotations
 
+import http.client
 import re
 import subprocess
 import sys
@@ -69,12 +70,22 @@ USER_AGENT = (
 ACCEPT = "application/atom+xml"
 RETRY_DELAYS = (5, 15, 45, 90, 180)
 RETRY_STATUSES = {406, 429, 500, 502, 503, 504}
-TRANSIENT = (urllib.error.URLError, TimeoutError, ConnectionError)
+#: Failures of the *transport*, not answers from arXiv. ``HTTPError`` is a
+#: ``URLError`` subclass but is handled first, by status; ``HTTPException``
+#: covers a connection dropped mid-body (``IncompleteRead``).
+TRANSIENT = (urllib.error.URLError, TimeoutError, ConnectionError,
+             http.client.HTTPException)
 _CURL_STATUS_MARKER = b"\n__PYAUTO_HTTP_STATUS__:"
 
 
 class ArxivAPIError(RuntimeError):
-    """The arXiv API could not answer a lookup reliably."""
+    """The arXiv API could not answer a lookup reliably.
+
+    Distinct from a ``None`` out of :func:`resolve_title`, which means arXiv
+    *did* answer and no unique title matched. Callers must never treat this as
+    a negative identification — in particular ``--mark-unresolved`` must not
+    NOTE-mark a line on the strength of it.
+    """
 
 
 def arxiv_id(ref: str | None) -> str | None:
@@ -232,13 +243,21 @@ def _request_once(url: str) -> bytes:
         return _curl_get(url)
 
 
-def _api_query(params: dict, *, delays: tuple | None = None) -> bytes:
+def _api_query(params: dict, *, delays: tuple | None = None,
+               sleep=time.sleep) -> bytes:
     """Query arXiv with retry/backoff and make transport failure explicit.
 
     September 2026 exposed two independent failure modes: arXiv can throttle
     shared runners with 429/406, and Fastly can reject Python's stdlib client
     fingerprint with a persistent 406 while curl succeeds. The latter gets one
     immediate alternate-transport attempt; real throttling still backs off.
+
+    The ladder is the same shape as PyAutoMind's ``arxiv_fetch.py:_get()``
+    (PyAutoMind#410), copied rather than imported: 429/406/5xx and transient
+    transport errors back off along `delays`, honouring ``Retry-After`` capped
+    at the ladder's longest step. 406 is arXiv's edge mitigation, not a
+    content-negotiation verdict, so it is retried like a 429. `sleep` is
+    injectable so the ladder can be tested without waiting it out.
     """
     if delays is None:
         delays = RETRY_DELAYS
@@ -269,7 +288,7 @@ def _api_query(params: dict, *, delays: tuple | None = None) -> bytes:
             f"retrying in {wait}s",
             file=sys.stderr,
         )
-        time.sleep(wait)
+        sleep(wait)
 
     raise ArxivAPIError(
         f"arXiv API unavailable after {attempts} attempt(s): {last_error}"
@@ -344,6 +363,12 @@ def resolve_title(title: str, max_results: int = 50,
                   query: object = _api_query) -> str | None:
     """Look `title` up on the arXiv API and return its id, or None.
 
+    ``None`` means exactly one thing: arXiv answered, and no unique title
+    matched. A lookup that never got a usable answer — HTTP error, DNS/network
+    failure, timeout, an unparseable body — raises :class:`ArxivAPIError`
+    instead, so the backfill can count it as an API failure rather than as
+    "no unique match".
+
     Networked — the Dashboard never calls this; only the backfill does.
     `query` is injected so the matching can be tested without arXiv.
 
@@ -360,10 +385,15 @@ def resolve_title(title: str, max_results: int = 50,
                      "start": 0, "max_results": max_results})
     except ArxivAPIError:
         raise
-    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+    except (*TRANSIENT, OSError) as e:
         # Injected query functions in tests and alternate callers may not use
         # _api_query(), so normalise their transport failures to the same
         # explicit signal. None remains reserved for a real arXiv answer that
         # contains no unique exact title match.
         raise ArxivAPIError(f"arXiv API lookup failed: {e}") from e
-    return match_entries(title, parse_api_entries(raw))
+    try:
+        entries = parse_api_entries(raw)
+    except ET.ParseError as e:
+        # An edge error page or a truncated body is not an answer either.
+        raise ArxivAPIError(f"arXiv API returned an unparseable body: {e}") from e
+    return match_entries(title, entries)
